@@ -10,36 +10,19 @@
         darkMode: 'class',
       }
     </script>
-    <!-- Firebase SDK Imports -->
-    <script type="importmap">
-      {
-        "imports": {
-          "react": "https://aistudiocdn.com/react@^19.2.0",
-          "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-          "react/": "https://aistudiocdn.com/react@^19.2.0/",
-          "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0",
-          "recharts": "https://aistudiocdn.com/recharts@^3.3.0",
-          "firebase/": "https://www.gstatic.com/firebasejs/10.12.2/firebase/"
-        }
-      }
-    </script>
+    <!--
+      The importmap has been removed.
+      Vite handles bundling dependencies from your package.json,
+      so an importmap is not needed and conflicts with the build process.
+    -->
   </head>
   <body class="bg-slate-50 dark:bg-slate-900">
     <div id="root"></div>
-    <!-- Global Firebase config variable (provided by environment) -->
-    <!-- <script>
-      // Example structure - DO NOT HARDCODE YOUR ACTUAL CONFIG HERE
-      // window.__firebase_config = JSON.stringify({
-      //   apiKey: "YOUR_API_KEY",
-      //   authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-      //   projectId: "YOUR_PROJECT_ID",
-      //   storageBucket: "YOUR_PROJECT_ID.appspot.com",
-      //   messagingSenderId: "YOUR_SENDER_ID",
-      //   appId: "YOUR_APP_ID"
-      // });
-      // window.__app_id = "your-unique-app-id"; // Provided by environment
-      // window.__initial_auth_token = "your-custom-auth-token"; // Optional, provided by environment
-    </script> -->
+    <!--
+      Global Firebase config variables are not needed here
+      because you are correctly loading them from .env
+      using import.meta.env in your App.tsx file.
+    -->
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>

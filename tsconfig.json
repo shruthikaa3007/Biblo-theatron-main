@@ -12,7 +12,7 @@
     "skipLibCheck": true,
     "types": [
       "node",
-      "vite/client" // Add Vite client types for import.meta.env
+      "vite/client"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,
@@ -21,13 +21,15 @@
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "baseUrl": "." // Keep baseUrl if needed, but remove paths
-    // "paths": { // Removed paths alias
-    //   "@/*": ["./*"]
-    // }
+    "baseUrl": "."
   },
-  // Ensure your source files are included (adjust if needed)
-  "include": ["src", "**/*.ts", "**/*.tsx"],
+  "include": [
+    // Updated to include root-level .ts/.tsx files
+    "*.ts",
+    "*.tsx",
+    // Also include files in subdirectories if you create them
+    "components/*.ts",
+    "components/*.tsx"
+  ],
   "exclude": ["node_modules", "dist"]
 }
-

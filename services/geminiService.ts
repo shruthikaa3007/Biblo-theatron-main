@@ -1,26 +1,45 @@
-import { GoogleGenerativeAI, type GenerateContentResponse, type RequestOptions, type GenerationConfig, type GenerateContentRequest, type GenerationConfig as GeminiGenerationConfig } from "@google/generative-ai";
-import type { Suggestion, AutocompleteSuggestion } from 'types.ts';
-import { MediaType } from 'types.ts';
+// Remove SDK type imports - define minimal types locally if needed
+// import type { GenerateContentResponse, GenerateContentRequest, GenerationConfig } from "@google/generative-ai";
+
+// Correct the import path assuming types.ts is in the root directory
+import type { Suggestion, AutocompleteSuggestion } from '../types.ts'; // Corrected Path
+import { MediaType } from '../types.ts'; // Corrected Path
 
 // --- Use Vite's import.meta.env ---
 const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+const geminiApiUrlBase = "https://generativelanguage.googleapis.com/v1beta/models";
 
 if (!apiKey) {
-    console.error("VITE_GEMINI_API_KEY is missing. Check your .env file.");
-    // Optionally, you could throw an error or have functions return null/empty immediately
-    // throw new Error("Missing VITE_GEMINI_API_KEY");
+    console.error("VITE_GEMINI_API_KEY is missing. Check your .env file or environment variables.");
 }
 
-// Initialize with the key loaded via Vite's env system
-// Use optional chaining in case apiKey is missing to prevent runtime error
-const ai = apiKey ? new GoogleGenerativeAI({ apiKey }) : null;
+// --- Minimal Local Types for API Payload ---
+// (Based on the structure used in the functions)
+interface ApiGenerationConfig {
+    responseMimeType?: "application/json";
+    responseSchema?: object; // Use generic object for schema
+    // Add other config fields if needed (temperature, topK, etc.)
+}
 
+interface ApiPart {
+    text: string;
+}
+
+interface ApiContent {
+    parts: ApiPart[];
+    role?: string; // Optional role, defaults to 'user' if omitted
+}
+
+interface ApiGenerateContentRequest {
+    contents: ApiContent[];
+    generationConfig?: ApiGenerationConfig;
+    // model name is part of the URL, not the payload body usually
+}
 
 // --- Schemas remain the same ---
-// (mediaDetailsSchema, suggestionsSchema, autocompleteSchema)
-
+// (Defined using standard JSON object format, compatible with API)
 const mediaDetailsSchema = {
-  type: "OBJECT", // Use string literals for Type enum values in schema
+  type: "OBJECT",
   properties: {
     title: { type: "STRING", description: 'The official title of the movie or book.' },
     type: { type: "STRING", description: 'The type of media, either "movie" or "book".', enum: ['movie', 'book']},
@@ -32,9 +51,9 @@ const mediaDetailsSchema = {
 };
 
 const suggestionsSchema = {
-    type: "ARRAY", // Use string literals
+    type: "ARRAY",
     items: {
-        type: "OBJECT", // Use string literals
+        type: "OBJECT",
         properties: {
             title: { type: "STRING" },
             description: { type: "STRING" },
@@ -46,9 +65,9 @@ const suggestionsSchema = {
 };
 
 const autocompleteSchema = {
-    type: "ARRAY", // Use string literals
+    type: "ARRAY",
     items: {
-        type: "OBJECT", // Use string literals
+        type: "OBJECT",
         properties: {
             title: { type: "STRING", description: "The title of the movie or book." },
             type: { type: "STRING", enum: ['movie', 'book'], description: "The type of media, either movie or book." },
@@ -61,114 +80,140 @@ const autocompleteSchema = {
 
 // --- API Call Functions ---
 
-// Helper for safe API calls
-async function safeGenerateContent(request: GenerateContentRequest): Promise<GenerateContentResponse | null> {
-    if (!ai) {
-        console.error("Gemini AI client not initialized (API key missing?).");
+// Helper for safe API calls using fetch with backoff
+async function safeGenerateContentWithFetch(payload: ApiGenerateContentRequest, modelName = "gemini-2.5-flash", retries = 3, delay = 1000): Promise<any | null> {
+    if (!apiKey) {
+        console.error("Gemini API key is missing. Cannot make API calls.");
         return null;
     }
-    try {
-        // Use getGenerativeModel to specify the model
-        const model = ai.getGenerativeModel({ model: request.model || "gemini-2.5-flash" }); // Default model if not specified
-        // Pass the rest of the request (contents, generationConfig)
-        const result = await model.generateContent({
-             contents: request.contents,
-             generationConfig: request.generationConfig as GeminiGenerationConfig // Cast needed for schema/mimetype
-        });
-        return result; // The result structure might vary slightly, adjust processing below if needed
 
-    } catch (error) {
-        console.error("Error calling Gemini API:", error);
-        // More specific error handling could be added here
-        return null;
+    const apiUrl = `${geminiApiUrlBase}/${modelName}:generateContent?key=${apiKey}`;
+
+    try {
+        console.log("Calling Gemini API:", apiUrl); // Log API call
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        console.log("API Response Status:", response.status); // Log status
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            console.error(`Error calling Gemini API: ${response.status} ${response.statusText}`, errorBody);
+
+            if (response.status === 429 && retries > 0) {
+                 console.warn(`Gemini API throttled. Retrying in ${delay / 1000}s... (${retries} retries left)`);
+                 await new Promise(resolve => setTimeout(resolve, delay));
+                 return safeGenerateContentWithFetch(payload, modelName, retries - 1, delay * 2);
+            }
+            // Throw error for non-retriable issues
+            throw new Error(`API Error ${response.status}: ${response.statusText} - ${errorBody}`);
+        }
+
+        const responseData = await response.json();
+        console.log("API Response Data:", JSON.stringify(responseData, null, 2)); // Log response data
+        return responseData;
+
+    } catch (error: any) {
+         if (retries > 0 && (error.message?.includes('network') || error.message?.includes('failed to fetch'))) {
+             console.warn(`Network error during Gemini API call. Retrying in ${delay / 1000}s... (${retries} retries left)`);
+             await new Promise(resolve => setTimeout(resolve, delay));
+             return safeGenerateContentWithFetch(payload, modelName, retries - 1, delay * 2);
+         }
+        console.error("Fetch error calling Gemini API:", error);
+        return null; // Return null on final failure
     }
 }
 
 
 export const fetchMediaDetails = async (query: string): Promise<Omit<Suggestion, 'type'> & { type: 'movie' | 'book' } | null> => {
-   const request: GenerateContentRequest = {
+   const payload: ApiGenerateContentRequest = { // Use local type
        contents: [{ parts: [{ text: `Generate details for the movie or book titled "${query}". Infer whether it's a movie or a book. Use a relevant seed for the picsum URL (e.g., /seed/query/).` }] }],
-       generationConfig: { // Use generationConfig
+       generationConfig: {
            responseMimeType: "application/json",
            responseSchema: mediaDetailsSchema,
-       } as GeminiGenerationConfig, // Cast to correct type if needed
-       model: "gemini-2.5-flash", // Specify model explicitly
+       },
    };
 
-   const result = await safeGenerateContent(request);
-
-    // Process response using optional chaining and standard structure
-    const candidate = result?.response?.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text;
+   const result = await safeGenerateContentWithFetch(payload, "gemini-2.5-flash");
+   const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
    if (text) {
      try {
-       return JSON.parse(text);
+       const parsedResult = JSON.parse(text);
+        if (parsedResult && typeof parsedResult === 'object' && parsedResult.title && (parsedResult.type === 'movie' || parsedResult.type === 'book')) {
+           return parsedResult;
+        } else {
+            console.warn("Parsed media details response is invalid or lacks required fields:", parsedResult);
+            return null;
+        }
      } catch (jsonError) {
        console.error("Error parsing Gemini JSON response (fetchMediaDetails):", jsonError, "Raw text:", text);
        return null;
      }
    }
-   console.log("No text content found in Gemini response (fetchMediaDetails).");
+   console.log("No text content found in Gemini response (fetchMediaDetails). Full result:", JSON.stringify(result, null, 2)); // Log full result on failure
    return null;
 };
 
 
 export const fetchSuggestions = async (genres: string[], type: MediaType): Promise<Omit<Suggestion, 'type'>[]> => {
-    if (genres.length === 0) return [];
+    if (!genres || genres.length === 0) return [];
 
-    const request: GenerateContentRequest = {
+    const payload: ApiGenerateContentRequest = { // Use local type
         contents: [{ parts: [{ text: `Suggest three ${type}s for someone who enjoys the following genres: ${genres.join(', ')}. Do not suggest titles that are extremely popular or part of a major franchise. Provide unique and interesting recommendations.` }] }],
-        generationConfig: { // Use generationConfig
+        generationConfig: {
             responseMimeType: "application/json",
             responseSchema: suggestionsSchema,
-        } as GeminiGenerationConfig,
-        model: "gemini-2.5-flash",
+        },
     };
 
-    const result = await safeGenerateContent(request);
-    const candidate = result?.response?.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text;
+    const result = await safeGenerateContentWithFetch(payload, "gemini-2.5-flash");
+    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
    if (text) {
      try {
-       return JSON.parse(text);
+       const parsedResult = JSON.parse(text);
+       if (Array.isArray(parsedResult)) {
+           return parsedResult;
+       } else {
+           console.warn("Parsed suggestions response is not an array:", parsedResult);
+           return [];
+       }
      } catch (jsonError) {
        console.error("Error parsing Gemini JSON response (fetchSuggestions):", jsonError, "Raw text:", text);
        return [];
      }
    }
-   console.log("No text content found in Gemini response (fetchSuggestions).");
+   console.log("No text content found in Gemini response (fetchSuggestions). Full result:", JSON.stringify(result, null, 2)); // Log full result on failure
    return [];
 };
 
 
 export const fetchSurpriseSuggestion = async (): Promise<Suggestion | null> => {
 
-    const request: GenerateContentRequest = {
+    const payload: ApiGenerateContentRequest = { // Use local type
         contents: [{ parts: [{ text: `Suggest one random, interesting, and lesser-known movie or book. Provide its title, a brief description, genres, and a placeholder poster URL from https://picsum.photos/300/450. Infer if it's a movie or book. Use a relevant seed for the picsum URL.` }] }],
-        generationConfig: { // Use generationConfig
+        generationConfig: {
             responseMimeType: "application/json",
-            responseSchema: mediaDetailsSchema,
-        } as GeminiGenerationConfig,
-        model: "gemini-2.5-flash",
+            responseSchema: mediaDetailsSchema, // Reusing mediaDetailsSchema
+        },
     };
 
-    const result = await safeGenerateContent(request);
-    const candidate = result?.response?.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text;
+    const result = await safeGenerateContentWithFetch(payload, "gemini-2.5-flash");
+    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (text) {
       try {
         const parsedResult = JSON.parse(text);
-        // Ensure the type from the response is correctly mapped to your enum
-        if (parsedResult && (parsedResult.type === 'movie' || parsedResult.type === 'book')) {
+        if (parsedResult && typeof parsedResult === 'object' && parsedResult.title && (parsedResult.type === 'movie' || parsedResult.type === 'book')) {
             return {
                 ...parsedResult,
                 type: parsedResult.type === 'movie' ? MediaType.Movie : MediaType.Book
             };
         } else {
-             console.warn("Surprise suggestion response has invalid type:", parsedResult?.type);
+             console.warn("Parsed surprise suggestion response is invalid or lacks required fields:", parsedResult);
              return null;
         }
       } catch (jsonError) {
@@ -176,37 +221,40 @@ export const fetchSurpriseSuggestion = async (): Promise<Suggestion | null> => {
         return null;
       }
     }
-    console.log("No text content found in Gemini response (fetchSurpriseSuggestion).");
+    console.log("No text content found in Gemini response (fetchSurpriseSuggestion). Full result:", JSON.stringify(result, null, 2)); // Log full result on failure
     return null;
 };
 
 
 export const fetchAutocompleteSuggestions = async (query: string): Promise<AutocompleteSuggestion[]> => {
-    if (!query) return [];
+    if (!query || query.trim().length < 2) return [];
 
-    const request: GenerateContentRequest = {
+    const payload: ApiGenerateContentRequest = { // Use local type
         contents: [{ parts: [{ text: `Provide up to 5 autocomplete suggestions for popular movie or book titles that start with "${query}". For each suggestion, include its type (movie or book) and year of release or publication if available.` }] }],
-        generationConfig: { // Use generationConfig
+        generationConfig: {
             responseMimeType: "application/json",
             responseSchema: autocompleteSchema,
-        } as GeminiGenerationConfig,
-        model: "gemini-2.5-flash",
+        },
     };
 
-    const result = await safeGenerateContent(request);
-    const candidate = result?.response?.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text;
+    const result = await safeGenerateContentWithFetch(payload, "gemini-2.5-flash");
+    const text = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
    if (text) {
      try {
        const results: AutocompleteSuggestion[] = JSON.parse(text);
-       return results;
+       if (Array.isArray(results)) {
+           return results;
+       } else {
+            console.warn("Parsed autocomplete response is not an array:", results);
+            return [];
+       }
      } catch (jsonError) {
        console.error("Error parsing Gemini JSON response (fetchAutocompleteSuggestions):", jsonError, "Raw text:", text);
        return [];
      }
    }
-   console.log("No text content found in Gemini response (fetchAutocompleteSuggestions).");
+   console.log("No text content found in Gemini response (fetchAutocompleteSuggestions). Full result:", JSON.stringify(result, null, 2)); // Log full result on failure
    return [];
 };
 
