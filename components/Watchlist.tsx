@@ -12,7 +12,7 @@ interface WatchlistProps {
 }
 
 type FilterType = 'all' | MediaType;
-type FilterStatus = 'all' | 'completed' | 'pending';
+type FilterStatus = 'all' | 'completed' | 'pending' | 'inprogress'; // Added 'inprogress'
 
 const Watchlist: React.FC<WatchlistProps> = ({ items, onDeleteItem, onUpdateStatus, onUpdateRating }) => {
   const [filterType, setFilterType] = useState<FilterType>('all');
@@ -24,7 +24,8 @@ const Watchlist: React.FC<WatchlistProps> = ({ items, onDeleteItem, onUpdateStat
       // Ensure status check uses correct MediaStatus values
       const statusMatch = filterStatus === 'all' ||
         (filterStatus === 'completed' && (item.status === MediaStatus.Watched || item.status === MediaStatus.Read)) ||
-        (filterStatus === 'pending' && (item.status === MediaStatus.ToWatch || item.status === MediaStatus.ToRead));
+        (filterStatus === 'pending' && (item.status === MediaStatus.ToWatch || item.status === MediaStatus.ToRead)) ||
+        (filterStatus === 'inprogress' && (item.status === MediaStatus.Watching || item.status === MediaStatus.Reading)); // Added check for in-progress
       return typeMatch && statusMatch;
     });
   }, [items, filterType, filterStatus]);
@@ -58,8 +59,9 @@ const Watchlist: React.FC<WatchlistProps> = ({ items, onDeleteItem, onUpdateStat
         {/* Status Filter */}
         <div className="flex items-center space-x-1 sm:space-x-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
             <FilterButton value="all" current={filterStatus} setter={setFilterStatus}>All Status</FilterButton>
-            <FilterButton value="completed" current={filterStatus} setter={setFilterStatus}>Completed</FilterButton>
             <FilterButton value="pending" current={filterStatus} setter={setFilterStatus}>Pending</FilterButton>
+            <FilterButton value="inprogress" current={filterStatus} setter={setFilterStatus}>In Progress</FilterButton>
+            <FilterButton value="completed" current={filterStatus} setter={setFilterStatus}>Completed</FilterButton>
         </div>
       </div>
 

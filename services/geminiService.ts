@@ -64,6 +64,23 @@ const suggestionsSchema = {
     }
 };
 
+// Schema for surprise me (returns multiple)
+const surpriseSuggestionsSchema = {
+    type: "ARRAY",
+    items: {
+        type: "OBJECT",
+        properties: {
+            title: { type: "STRING" },
+            type: { type: "STRING", enum: ['movie', 'book'], description: "The type of media, either movie or book." },
+            genres: { type: "ARRAY", items: { type: "STRING" } },
+            description: { type: "STRING" },
+            posterUrl: { type: "STRING", description: 'A placeholder image URL from https://picsum.photos/300/450' },
+        },
+        required: ['title', 'type', 'genres', 'description', 'posterUrl']
+    }
+};
+
+
 const autocompleteSchema = {
     type: "ARRAY",
     items: {
@@ -191,13 +208,13 @@ export const fetchSuggestions = async (genres: string[], type: MediaType): Promi
 };
 
 
-export const fetchSurpriseSuggestion = async (): Promise<Suggestion | null> => {
+export const fetchSurpriseSuggestion = async (): Promise<Suggestion[] | null> => {
 
     const payload: ApiGenerateContentRequest = { // Use local type
-        contents: [{ parts: [{ text: `Suggest one random, interesting, and lesser-known movie or book. Provide its title, a brief description, genres, and a placeholder poster URL from https://picsum.photos/300/450. Infer if it's a movie or book. Use a relevant seed for the picsum URL.` }] }],
+        contents: [{ parts: [{ text: `Suggest three random, interesting, and lesser-known movies or books. Provide title, description, genres, type (movie or book), and a placeholder poster URL from https://picsum.photos/300/450. Use a relevant seed for the picsum URL.` }] }],
         generationConfig: {
             responseMimeType: "application/json",
-            responseSchema: mediaDetailsSchema, // Reusing mediaDetailsSchema
+            responseSchema: surpriseSuggestionsSchema, // Use new schema for multiple items
         },
     };
 
@@ -207,13 +224,14 @@ export const fetchSurpriseSuggestion = async (): Promise<Suggestion | null> => {
     if (text) {
       try {
         const parsedResult = JSON.parse(text);
-        if (parsedResult && typeof parsedResult === 'object' && parsedResult.title && (parsedResult.type === 'movie' || parsedResult.type === 'book')) {
-            return {
-                ...parsedResult,
-                type: parsedResult.type === 'movie' ? MediaType.Movie : MediaType.Book
-            };
+        if (Array.isArray(parsedResult) && parsedResult.length > 0) {
+            // Map the 'type' string to the MediaType enum
+            return parsedResult.map((item: any) => ({
+                ...item,
+                type: item.type === 'movie' ? MediaType.Movie : MediaType.Book
+            }));
         } else {
-             console.warn("Parsed surprise suggestion response is invalid or lacks required fields:", parsedResult);
+             console.warn("Parsed surprise suggestion response is not a valid array:", parsedResult);
              return null;
         }
       } catch (jsonError) {
@@ -257,4 +275,3 @@ export const fetchAutocompleteSuggestions = async (query: string): Promise<Autoc
    console.log("No text content found in Gemini response (fetchAutocompleteSuggestions). Full result:", JSON.stringify(result, null, 2)); // Log full result on failure
    return [];
 };
-

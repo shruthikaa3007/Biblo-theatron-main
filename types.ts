@@ -10,9 +10,9 @@ export enum MediaStatus {
   Read = 'read',
   ToWatch = 'to-watch',
   ToRead = 'to-read',
-  // Added potential statuses if needed later, ensure isValidMediaStatus checks these too if used.
-  // Watching = 'watching',
-  // Reading = 'reading',
+  // Added "in-progress" statuses
+  Watching = 'watching',
+  Reading = 'reading',
 }
 
 export interface MediaItem {

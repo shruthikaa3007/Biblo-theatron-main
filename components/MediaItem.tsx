@@ -1,7 +1,7 @@
 import React from 'react';
 import type { MediaItem as MediaItemType } from '../types'; // Use type import alias
 import { MediaStatus, MediaType } from '../types';
-import { StarIcon, TrashIcon } from './icons'; // Assuming icons are correctly exported
+import { StarIcon, TrashIcon, PlayIcon } from './icons'; // Assuming icons are correctly exported
 
 interface MediaItemProps {
   item: MediaItemType;
@@ -31,21 +31,74 @@ const Rating: React.FC<{ rating: number | null; onRate: (rating: number | null) 
 
 
 const MediaItemComponent: React.FC<MediaItemProps> = ({ item, onDelete, onUpdateStatus, onUpdateRating }) => {
+  // Define all 3 states
+  const isPending = item.status === MediaStatus.ToWatch || item.status === MediaStatus.ToRead;
+  const isInProgress = item.status === MediaStatus.Watching || item.status === MediaStatus.Reading;
   const isCompleted = item.status === MediaStatus.Watched || item.status === MediaStatus.Read;
+
+  // Define verb variants
   const verbPast = item.type === MediaType.Movie ? 'Watched' : 'Read';
-  // const verbPresent = item.type === MediaType.Movie ? 'Watch' : 'Read'; // Not used
+  const verbPresent = item.type === MediaType.Movie ? 'Watch' : 'Read';
+  const verbProgressive = item.type === MediaType.Movie ? 'Watching' : 'Reading';
 
   const handleStatusChange = () => {
     let newStatus: MediaStatus;
-    if (isCompleted) {
-        // If completed, mark as pending
-        newStatus = item.type === MediaType.Movie ? MediaStatus.ToWatch : MediaStatus.ToRead;
-    } else {
-        // If pending, mark as completed
-        newStatus = item.type === MediaType.Movie ? MediaStatus.Watched : MediaStatus.Read;
+    if (item.type === MediaType.Movie) {
+        if (item.status === MediaStatus.ToWatch) {
+            newStatus = MediaStatus.Watching;
+        } else if (item.status === MediaStatus.Watching) {
+            newStatus = MediaStatus.Watched;
+        } else { // item.status === MediaStatus.Watched
+            newStatus = MediaStatus.ToWatch;
+        }
+    } else { // item.type === MediaType.Book
+        if (item.status === MediaStatus.ToRead) {
+            newStatus = MediaStatus.Reading;
+        } else if (item.status === MediaStatus.Reading) {
+            newStatus = MediaStatus.Read;
+        } else { // item.status === MediaStatus.Read
+            newStatus = MediaStatus.ToRead;
+        }
     }
     onUpdateStatus(item.id, newStatus);
   };
+
+  // Determine button text, title, style based on state
+  let buttonText = '';
+  let buttonTitle = '';
+  let buttonStyle = '';
+  let ButtonIcon = null;
+
+  if (isPending) {
+    buttonText = `Start ${verbProgressive}`;
+    buttonTitle = `Mark as ${verbProgressive}`;
+    // Green
+    buttonStyle = 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/50 dark:text-green-300 dark:hover:bg-green-800/50';
+    ButtonIcon = <PlayIcon className="h-4 w-4 mr-1" />;
+  } else if (isInProgress) {
+    buttonText = `Mark ${verbPast}`;
+    buttonTitle = `Mark as ${verbPast}`;
+    // Blue
+    buttonStyle = 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/50 dark:text-blue-300 dark:hover:bg-blue-800/50';
+    // Simple checkmark
+    ButtonIcon = (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+        </svg>
+    );
+  } else { // isCompleted
+    buttonText = `Mark To ${verbPresent}`;
+    buttonTitle = `Reset status to To ${verbPresent}`;
+    // Slate/Grey
+    buttonStyle = 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600';
+    // Checked circle
+    ButtonIcon = (
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+    );
+  }
+
 
   return (
     // Added group class for potential hover effects on children
@@ -65,6 +118,13 @@ const MediaItemComponent: React.FC<MediaItemProps> = ({ item, onDelete, onUpdate
         />
          {/* Optional: Add a gradient overlay for text readability */}
          {/* <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/50 to-transparent"></div> */}
+         
+         {/* Status Badge */}
+         {isInProgress && (
+            <span className="absolute top-2 left-2 bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full shadow-lg">
+                {verbProgressive}
+            </span>
+         )}
       </div>
 
       {/* Content Area */}
@@ -98,24 +158,11 @@ const MediaItemComponent: React.FC<MediaItemProps> = ({ item, onDelete, onUpdate
             <div className="flex justify-between items-center">
                 <button
                     onClick={handleStatusChange}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors duration-200 flex items-center ${
-                        isCompleted
-                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'
-                        : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/50 dark:text-green-300 dark:hover:bg-green-800/50'
-                    }`}
-                    title={isCompleted ? `Mark as To ${item.type === MediaType.Movie ? 'Watch' : 'Read'}` : `Mark as ${verbPast}`}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors duration-200 flex items-center ${buttonStyle}`}
+                    title={buttonTitle}
                 >
-                    {/* Checkmark Icon */}
-                    {isCompleted ? (
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                           <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                    ) : (
-                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                    )}
-                    {isCompleted ? `Undo ${verbPast}` : `Mark ${verbPast}`}
+                    {ButtonIcon}
+                    {buttonText}
                 </button>
                 <button
                     onClick={() => onDelete(item.id)}

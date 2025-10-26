@@ -7,16 +7,19 @@ import GenreAnalytics from './components/GenreAnalytics.tsx';
 import Suggestions from './components/Suggestions.tsx';
 import type { MediaItem } from './types.ts';
 import { MediaStatus, MediaType } from './types.ts';
+import { GoogleIcon } from './components/icons.tsx'; // Import Google Icon
 
 // Firebase Imports
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import {
     getAuth,
-    signInAnonymously,
-    // signInWithCustomToken, // Not used for local .env setup
+    // signInAnonymously, // No longer needed
     onAuthStateChanged,
     type Auth,
-    type User
+    type User,
+    GoogleAuthProvider, // Import Google Auth Provider
+    signInWithPopup,    // Import popup sign-in method
+    signOut             // Import sign-out method
 } from 'firebase/auth';
 import {
     getFirestore,
@@ -55,6 +58,7 @@ function isValidMediaType(type: any): type is MediaType {
 // Helper function to validate MediaStatus
 function isValidMediaStatus(status: any): status is MediaStatus {
     // Check against all possible values in the enum from types.ts
+    // This now includes Watching and Reading
     return Object.values(MediaStatus).includes(status as MediaStatus);
 }
 // --- End Helper Functions ---
@@ -104,26 +108,9 @@ function App() {
           console.log("Auth state changed: User is signed out.");
           setUser(null);
           setUserId(null);
-          // Attempt anonymous sign-in for local dev if not signed in
-          try {
-            console.log("Attempting anonymous sign in...");
-            // Prevent sign-in loop if already signed in or during initial check
-            if (authInstance.currentUser) {
-                console.log("Already signed in or in process, skipping anon sign in.");
-            } else {
-                 const anonUserCredential = await signInAnonymously(authInstance);
-                 console.log("signInAnonymously successful:", anonUserCredential.user.uid, "(onAuthStateChanged will trigger again).");
-            }
-          } catch (signInError) {
-            console.error("Error during anonymous sign-in attempt:", signInError);
-            setError("Anonymous authentication failed. Check Firebase Auth settings.");
-            setUserId(null); // Explicitly clear userId on failed sign-in attempt
-            // Only set auth ready here on error if it wasn't already set
-            if (!isAuthReady) setIsAuthReady(true);
-            setIsLoading(false); // Stop loading if auth fails definitively
-          }
+          // We no longer sign in anonymously. The user must click the button.
         }
-        // Mark auth as ready *after* the first callback runs and we have a user state (or attempted sign-in)
+        // Mark auth as ready *after* the first callback runs and we have a user state
          if (!isAuthReady) {
             console.log("Authentication check complete. isAuthReady set to true.");
             setIsAuthReady(true);
@@ -206,6 +193,9 @@ function App() {
                 description: data.description || 'No description available.',
             });
         } else {
+             // If status is invalid (e.g., old 'watched'/'read' from before "in-progress" was added),
+             // log it but still add it, maybe coercing status?
+             // For now, we'll just skip if status is not one of the *new* valid enums
             console.warn("Skipping document due to invalid/missing type, status, or title:", doc.id, data);
         }
       });
@@ -249,6 +239,54 @@ function App() {
 
   const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
+  // --- Auth Handlers ---
+  const handleGoogleSignIn = async () => {
+    let auth: Auth | null = null;
+    try {
+        auth = getAuth();
+    } catch(e) {
+        console.error("Firebase Auth not initialized for handleGoogleSignIn");
+        setError("Authentication service is not ready. Please refresh.");
+        return;
+    }
+    
+    if (!auth) return;
+
+    const provider = new GoogleAuthProvider();
+    try {
+        setError(null);
+        await signInWithPopup(auth, provider);
+        // onAuthStateChanged will handle setting the user state
+        console.log("signInWithPopup successful, onAuthStateChanged will trigger.");
+    } catch (err) {
+        console.error("Error during Google sign-in:", err);
+        setError(`Failed to sign in: ${err instanceof Error ? err.message : 'Unknown auth error'}.`);
+    }
+  };
+
+  const handleSignOut = async () => {
+    let auth: Auth | null = null;
+    try {
+        auth = getAuth();
+    } catch(e) {
+        console.error("Firebase Auth not initialized for handleSignOut");
+        return;
+    }
+
+    if (!auth) return;
+
+    try {
+        await signOut(auth);
+        // onAuthStateChanged will handle clearing the user state
+        console.log("Sign-out successful, onAuthStateChanged will trigger.");
+        setMediaItems([]); // Clear data on sign-out
+    } catch (err) {
+        console.error("Error during sign-out:", err);
+        setError(`Failed to sign out: ${err instanceof Error ? err.message : 'Unknown auth error'}.`);
+    }
+  };
+
+
   // --- Firestore Handlers ---
   // Memoize getCollectionRef to potentially avoid recalculating if db/userId haven't changed, though minor impact here
   const getCollectionRef = React.useCallback(() => {
@@ -277,6 +315,16 @@ function App() {
           setError("Cannot add item: Missing title, type, or status.");
           return;
       }
+
+      // Check if item with this title already exists
+      // Note: This is a client-side check. For true uniqueness, you'd need Firestore rules
+      // or a more complex check, but this prevents simple duplicates.
+      const exists = mediaItems.some(item => item.title.toLowerCase() === newItemData.title.toLowerCase() && item.type === newItemData.type);
+      if (exists) {
+          setError(`"${newItemData.title}" is already in your list.`);
+          return; // Stop execution
+      }
+
       console.log("Attempting to add item:", newItemData.title);
       try {
           setError(null); // Clear previous errors
@@ -323,6 +371,12 @@ function App() {
           setError("Cannot update status: Database connection or user ID is missing.");
           return;
       }
+      // Validate the status just in case
+      if (!isValidMediaStatus(status)) {
+          console.error("Invalid status update attempt:", status);
+          setError("Failed to update status: Invalid status value.");
+          return;
+      }
       console.log("Attempting to update status for item:", id, "to", status);
       try {
           setError(null);
@@ -354,6 +408,8 @@ function App() {
   };
 
   // --- Render Logic ---
+
+  // A simple loading component
   const renderLoadingIndicator = (message: string) => (
        <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-e-transparent align-[-0.125em] text-indigo-500 motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
@@ -371,14 +427,36 @@ function App() {
     if (!userId) {
         return (
             <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
-                <p className="text-red-500 dark:text-red-400 font-semibold">Authentication Issue</p>
-                <p className="text-slate-500 dark:text-slate-400 mt-2">{error || "Could not authenticate user. Cannot load or save watchlist data."}</p>
-            </div>
-        );
+          <p className="mt-2 text-slate-500 dark:text-slate-400">{onmessage}</p>
+       </div>
+  );
+
+  // A simple login screen component
+  const renderLoginScreen = () => (
+      <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-lg max-w-md mx-auto">
+          <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-4">Welcome to Biblio-theatron</h2>
+          <p className="text-slate-600 dark:text-slate-400 mb-6">Please sign in with Google to save and manage your watchlist.</p>
+          <button
+            onClick={handleGoogleSignIn}
+            className="flex w-full justify-center items-center gap-3 px-6 py-3 bg-indigo-600 text-white font-semibold rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
+          >
+              <GoogleIcon className="w-6 h-6" />
+              Sign in with Google
+          </button>
+      </div>
+  );
+
+  const renderContent = () => {
+    // Show loading indicator until authentication check is complete
+    if (!isAuthReady) return renderLoadingIndicator("Authenticating...");
+
+    // Show Login screen if auth is ready but user is not logged in
+    if (isAuthReady && !userId) {
+        return renderLoginScreen();
     }
 
-    // Show loading indicator while fetching Firestore data (after auth is ready)
-     if (isLoading) return renderLoadingIndicator("Loading your watchlist...");
+    // Show loading indicator while fetching Firestore data (after auth is ready and user exists)
+     if (isLoading && isAuthReady && userId) return renderLoadingIndicator("Loading your watchlist...");
 
     // Main content when authenticated and data loaded (or empty)
     return (
@@ -389,7 +467,7 @@ function App() {
                 <div className="lg:col-span-1 order-last lg:order-first">
                     <div className="space-y-8">
                         {/* Pass items only if not loading and user exists */}
-                        <Suggestions items={mediaItems} />
+                        <Suggestions items={mediaItems} onAddItem={handleAddItem} />
                         <GenreAnalytics items={mediaItems} />
                     </div>
                 </div>
@@ -411,13 +489,18 @@ function App() {
   // --- Main Return ---
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans">
-      <Header isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
+      <Header 
+        isDarkMode={isDarkMode} 
+        toggleDarkMode={toggleDarkMode}
+        user={user}
+        handleSignOut={handleSignOut} 
+      />
       <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8">
 
         {/* Display User ID for context (only if user exists) */}
-        {userId && (
+        {user && ( // Use 'user' object for richer data
             <div className="text-xs text-center text-slate-500 dark:text-slate-400 mb-2">
-                User ID: <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">{userId}</code> {user?.isAnonymous ? '(Anonymous)' : ''}
+                Signed in as: <code className="bg-slate-200 dark:bg-slate-700 px-1 rounded">{user.displayName || user.email}</code>
             </div>
         )}
 
@@ -452,3 +535,4 @@ function App() {
 }
 
 export default App;
+  }
