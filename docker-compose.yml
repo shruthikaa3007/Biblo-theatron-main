@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        # Pass the build-time arg for Vite
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+    ports:
+      - "3001:3001" # Expose the server port
+    # Load all variables from .env file at runtime
+    env_file:
+      - ./.env
+    # Set NODE_ENV to "docker" (or "production")
+    # MONGODB_URI will be loaded from the .env file
+    environment:
+      NODE_ENV: docker
+    restart: unless-stopped
+
+# We no longer need the 'mongo' service or 'mongo-data' volume
+# as we are using the cloud MongoDB Atlas database.
+

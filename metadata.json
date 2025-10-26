@@ -1,0 +1,5 @@
+{
+  "name": "Biblio-theatron — Smart Movie & Book Watchlist",
+  "description": "A lightweight web app to track movies and books you want to watch or read, with a unique 'Smart Suggestion Engine' that recommends what to watch/read next based on your personal habits and preferences.",
+  "requestFramePermissions": []
+}
