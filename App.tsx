@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-// FIX: Use relative paths instead of alias
-import Header from './components/Header';
-import Watchlist from './components/Watchlist';
-import AddItemForm from './components/AddItemForm';
-import GenreAnalytics from './components/GenreAnalytics';
-import Suggestions from './components/Suggestions';
-import type { MediaItem } from './types';
-import { MediaStatus, MediaType } from './types'; // Import MediaType
+// Use relative paths with extensions
+import Header from './components/Header.tsx';
+import Watchlist from './components/Watchlist.tsx';
+import AddItemForm from './components/AddItemForm.tsx';
+import GenreAnalytics from './components/GenreAnalytics.tsx';
+import Suggestions from './components/Suggestions.tsx';
+import type { MediaItem } from './types.ts';
+import { MediaStatus, MediaType } from './types.ts';
 
-// Firebase Imports (ensure these match your index.html importmap or npm install)
+// Firebase Imports
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import {
     getAuth,
     signInAnonymously,
-    signInWithCustomToken,
+    // signInWithCustomToken, // Not used for local .env setup
     onAuthStateChanged,
     type Auth,
     type User
@@ -27,19 +27,26 @@ import {
     deleteDoc,
     doc,
     updateDoc,
-    Timestamp, // Use Timestamp for potential date fields
-    // setLogLevel, // Optional: for debugging
+    Timestamp,
+    // setLogLevel, // Optional: for debugging Firestore
     type Firestore
 } from 'firebase/firestore';
 
-// Define expected global variables structure (for type safety)
-declare global {
-  interface Window {
-    __firebase_config?: string;
-    __app_id?: string;
-    __initial_auth_token?: string;
-  }
-}
+// --- Vite Environment Variables ---
+// Access variables defined in .env (prefixed with VITE_)
+const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
+// App ID specifically for Firestore path construction
+const appId = import.meta.env.VITE_APP_ID || 'biblio-theatron-local-fallback'; // Fallback App ID for local dev
+
+// Basic check if config seems loaded from .env
+const isFirebaseConfigLoaded = firebaseConfig.apiKey && firebaseConfig.projectId;
 
 // Helper function to validate MediaType
 function isValidMediaType(type: any): type is MediaType {
@@ -49,7 +56,7 @@ function isValidMediaType(type: any): type is MediaType {
 function isValidMediaStatus(status: any): status is MediaStatus {
     return Object.values(MediaStatus).includes(status);
 }
-
+// --- End Helper Functions ---
 
 function App() {
   const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
@@ -58,41 +65,35 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   // Firebase state
-  const [auth, setAuth] = useState<Auth | null>(null);
-  const [db, setDb] = useState<Firestore | null>(null);
+  // Note: We don't store auth/db in state if initialized directly in useEffect
+  // const [auth, setAuth] = useState<Auth | null>(null);
+  // const [db, setDb] = useState<Firestore | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [userId, setUserId] = useState<string | null>(null); // To store UID or random ID
+  const [userId, setUserId] = useState<string | null>(null); // To store UID
   const [isAuthReady, setIsAuthReady] = useState(false); // Track if initial auth check is done
 
   // --- Initialize Firebase and Auth Listener ---
   useEffect(() => {
-    console.log("Attempting Firebase initialization...");
-    // Check if Firebase config is available
-    if (typeof window.__firebase_config !== 'string' || !window.__firebase_config) {
-      console.error("Firebase config (__firebase_config) is missing or invalid.");
-      setError("Firebase configuration is missing. Cannot initialize application.");
+    console.log("Attempting Firebase initialization using Vite env vars...");
+    if (!isFirebaseConfigLoaded) {
+      console.error("Firebase config (VITE_FIREBASE_...) not found in .env file or environment.");
+      setError("Firebase configuration is missing. Check your .env file and ensure variables start with VITE_");
       setIsLoading(false);
       setIsAuthReady(true); // Mark auth check as done (failed)
       return;
     }
 
+    let app: FirebaseApp;
+    let authInstance: Auth;
+    let dbInstance: Firestore;
+
     try {
-      const firebaseConfig = JSON.parse(window.__firebase_config);
-      // Check for essential config keys
-      if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-          throw new Error("Invalid Firebase config structure.");
-      }
-      console.log("Firebase config loaded:", firebaseConfig.projectId);
-
-      const app: FirebaseApp = initializeApp(firebaseConfig);
-      const authInstance = getAuth(app);
-      const dbInstance = getFirestore(app);
-
+      console.log("Firebase config loaded via import.meta.env for project:", firebaseConfig.projectId);
+      app = initializeApp(firebaseConfig);
+      authInstance = getAuth(app);
+      dbInstance = getFirestore(app);
       // Optional: Set log level for debugging Firestore
       // setLogLevel('debug');
-
-      setAuth(authInstance);
-      setDb(dbInstance);
       console.log("Firebase app, auth, and db initialized.");
 
       // --- Auth state listener ---
@@ -100,35 +101,30 @@ function App() {
         if (currentUser) {
           console.log("Auth state changed: User is signed in:", currentUser.uid, "Anonymous:", currentUser.isAnonymous);
           setUser(currentUser);
-          setUserId(currentUser.uid); // Use Firebase UID (works for anon too)
+          setUserId(currentUser.uid);
         } else {
-          console.log("Auth state changed: User is signed out or token expired.");
-          setUser(null); // Clear previous user state
-          setUserId(null); // Clear userId
-          // Attempt sign-in only if not already authenticated
+          console.log("Auth state changed: User is signed out.");
+          setUser(null);
+          setUserId(null);
+          // Attempt anonymous sign-in for local dev if not signed in
           try {
-              if (typeof window.__initial_auth_token === 'string' && window.__initial_auth_token) {
-                  console.log("Attempting sign in with custom token...");
-                  // Check if already trying to sign in to prevent loops
-                  if (authInstance.currentUser) return; // Already signed in or in process
-                  await signInWithCustomToken(authInstance, window.__initial_auth_token);
-                  console.log("signInWithCustomToken successful (onAuthStateChanged will trigger again).");
-              } else {
-                  console.log("No custom token found, attempting anonymous sign in...");
-                   // Check if already trying to sign in to prevent loops
-                  if (authInstance.currentUser) return; // Already signed in or in process
-                  const anonUserCredential = await signInAnonymously(authInstance);
-                  console.log("signInAnonymously successful:", anonUserCredential.user.uid, "(onAuthStateChanged will trigger again).");
-              }
+            console.log("Attempting anonymous sign in...");
+            if (authInstance.currentUser) {
+                console.log("Already signed in or in process, skipping anon sign in.");
+                return; // Prevent loop if already processing
+            }
+            const anonUserCredential = await signInAnonymously(authInstance);
+            console.log("signInAnonymously successful:", anonUserCredential.user.uid, "(onAuthStateChanged will trigger again).");
           } catch (signInError) {
-              console.error("Error during initial sign-in attempt:", signInError);
-              setError("Authentication failed. Data cannot be loaded.");
-              setUserId(null); // Explicitly ensure no userId on auth failure
-              setIsAuthReady(true); // Mark auth check complete (even on failure)
-              setIsLoading(false); // Stop loading indicator
+            console.error("Error during anonymous sign-in attempt:", signInError);
+            setError("Anonymous authentication failed. Check Firebase Auth settings.");
+            setUserId(null);
+            // Only set auth ready here on error if it wasn't already set
+            if (!isAuthReady) setIsAuthReady(true);
+            setIsLoading(false);
           }
         }
-        // Mark auth as ready *after* the first callback runs
+        // Mark auth as ready *after* the first callback runs and we have a user state
          if (!isAuthReady) {
             console.log("Authentication check complete. isAuthReady set to true.");
             setIsAuthReady(true);
@@ -142,7 +138,7 @@ function App() {
       }
 
     } catch (e) {
-      console.error("Error parsing Firebase config or initializing Firebase:", e);
+      console.error("Error initializing Firebase:", e);
       setError(`Failed to initialize Firebase: ${e instanceof Error ? e.message : 'Unknown error'}`);
       setIsLoading(false);
       setIsAuthReady(true); // Mark auth check as done (failed)
@@ -151,32 +147,30 @@ function App() {
 
   // --- Firestore Data Listener ---
   useEffect(() => {
-    // Conditions to set up the listener: db initialized, auth check complete, userId exists.
+    // Get db instance directly inside effect or ensure it's stable
+     const db = getFirestore(); // Get instance (assuming app is initialized)
+
+    // Conditions to set up the listener: db exists, auth check complete, userId exists.
     if (!db || !isAuthReady || !userId) {
         if (isAuthReady && !userId) {
-            // Auth check finished, but we failed to get a user ID. Stop loading.
             console.log("Auth ready, but no userId. Cannot attach Firestore listener.");
             setIsLoading(false);
-            // Optionally clear items if auth fails after initial load
-             setMediaItems([]); // Clear data if auth fails
+            setMediaItems([]); // Clear data if auth fails/no user
         } else {
             console.log("Firestore/Auth not ready or userId pending, skipping Firestore listener setup.");
-            // Ensure loading is true if auth isn't ready yet
-             if (!isAuthReady) setIsLoading(true);
+             if (!isAuthReady) setIsLoading(true); // Keep loading if auth isn't ready
         }
         return; // Exit if conditions not met
     }
 
-    // Determine the correct collection path using required globals
-    const appId = typeof window.__app_id === 'string' && window.__app_id ? window.__app_id : 'default-app-id';
-    // Use private collection path per user
+    // Use appId loaded from import.meta.env
     const collectionPath = `artifacts/${appId}/users/${userId}/mediaitems`;
     console.log(`Setting up Firestore listener for path: ${collectionPath}`);
     const itemsCollectionRef = collection(db, collectionPath);
-    // Query without ordering initially, sort client-side
     const q = query(itemsCollectionRef);
 
-    setIsLoading(true); // Set loading true when listener attaches
+    // Don't reset loading if already false from auth failure
+    if (isLoading === null || isLoading === undefined) setIsLoading(true);
     setError(null);
 
     const unsubscribeFirestore = onSnapshot(q, (querySnapshot) => {
@@ -184,29 +178,27 @@ function App() {
       const items: MediaItem[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data();
-        // **FIX: Validate type and status before creating the object**
         const dataType = data?.type;
         const dataStatus = data?.status;
 
         if (isValidMediaType(dataType) && isValidMediaStatus(dataStatus) && data.title) {
             items.push({
-                id: doc.id, // Use Firestore document ID
-                user_id: data.user_id || userId, // Ensure user_id matches
-                type: dataType, // Use validated type
+                id: doc.id,
+                user_id: data.user_id || userId,
+                type: dataType,
                 title: data.title,
-                genres: Array.isArray(data.genres) ? data.genres : [], // Default to empty array
-                status: dataStatus, // Use validated status
-                rating: typeof data.rating === 'number' ? data.rating : null, // Handle null/undefined
-                api_id: data.api_id || doc.id, // Fallback api_id if missing
-                posterUrl: data.posterUrl || `https://placehold.co/300x450/666/fff?text=${encodeURIComponent(data.title)}`, // Add placeholder fallback
-                description: data.description || 'No description available.', // Add placeholder fallback
+                genres: Array.isArray(data.genres) ? data.genres : [],
+                status: dataStatus,
+                rating: typeof data.rating === 'number' ? data.rating : null,
+                api_id: data.api_id || doc.id,
+                posterUrl: data.posterUrl || `https://placehold.co/300x450/666/fff?text=${encodeURIComponent(data.title)}`,
+                description: data.description || 'No description available.',
             });
         } else {
             console.warn("Skipping document due to invalid/missing type, status, or title:", doc.id, data);
         }
       });
-      // Sort client-side (e.g., by ID descending to approximate newest)
-      items.sort((a, b) => b.id.localeCompare(a.id));
+      items.sort((a, b) => b.id.localeCompare(a.id)); // Sort client-side
       setMediaItems(items);
       setIsLoading(false); // Data loaded/updated
       console.log("Media items state updated:", items.length, "items");
@@ -216,208 +208,137 @@ function App() {
       setIsLoading(false);
     });
 
-    // Cleanup Firestore listener on unmount or when dependencies change
+    // Cleanup Firestore listener
     return () => {
         console.log("Cleaning up Firestore listener.");
         unsubscribeFirestore();
     }
 
-  }, [db, isAuthReady, userId]); // Re-run if db, auth readiness, or userId changes
+  }, [isAuthReady, userId]); // Depend only on auth readiness and userId
 
   // --- Dark Mode Effects ---
    useEffect(() => {
-    // Check initial preference
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     setIsDarkMode(prefersDark);
-    console.log("Initial dark mode preference:", prefersDark);
-
-    // Listen for changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    const handleChange = (e: MediaQueryListEvent) => {
-        console.log("Dark mode preference changed:", e.matches);
-        setIsDarkMode(e.matches);
-    }
-    // Use addEventListener/removeEventListener for modern browsers
-    try {
-        mediaQuery.addEventListener('change', handleChange);
-    } catch (e) { // Fallback for older browsers
-        try {
-            mediaQuery.addListener(handleChange);
-        } catch (e2) {
-             console.error("Error adding dark mode listener:", e2);
-        }
-    }
-
-    return () => {
-         try {
-            mediaQuery.removeEventListener('change', handleChange);
-        } catch (e) { // Fallback for older browsers
-            try {
-                 mediaQuery.removeListener(handleChange);
-            } catch (e2) {
-                 console.error("Error removing dark mode listener:", e2);
-            }
-        }
-    }
+    const handleChange = (e: MediaQueryListEvent) => setIsDarkMode(e.matches);
+    try { mediaQuery.addEventListener('change', handleChange); } catch (e) { try { mediaQuery.addListener(handleChange); } catch (e2) {} } // Add listener + fallback
+    return () => { try { mediaQuery.removeEventListener('change', handleChange); } catch (e) { try { mediaQuery.removeListener(handleChange); } catch (e2) {} } }; // Cleanup + fallback
   }, []);
 
   useEffect(() => {
-    // Apply class to HTML element
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-      console.log("Applied dark mode class");
-    } else {
-      document.documentElement.classList.remove('dark');
-      console.log("Removed dark mode class");
-    }
+    document.documentElement.classList.toggle('dark', isDarkMode); // Toggle class based on state
   }, [isDarkMode]);
 
-  const toggleDarkMode = () => {
-      console.log("Toggling dark mode");
-      setIsDarkMode(prev => !prev);
-  }
+  const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
   // --- Firestore Handlers ---
-
-  // Helper to get collection reference, ensures db and userId exist
   const getCollectionRef = () => {
+      const db = getFirestore(); // Get current Firestore instance
       if (!db || !userId) {
-          console.error("Cannot get collection ref: Firestore DB or User ID is missing.");
+          console.error("Cannot perform action: Firestore DB not ready or User ID is missing.");
           setError("Action failed: Database connection or user ID is missing.");
           return null;
       }
-      const appId = typeof window.__app_id === 'string' && window.__app_id ? window.__app_id : 'default-app-id';
-      // Ensure appId is valid, fallback shouldn't ideally be used in production
-      if (appId === 'default-app-id') {
-          console.warn("__app_id global variable not found, using 'default-app-id'.");
-      }
+      // Use appId from import.meta.env
       return collection(db, `artifacts/${appId}/users/${userId}/mediaitems`);
   }
 
   const handleAddItem = async (newItemData: Omit<MediaItem, 'id' | 'user_id'>) => {
       const collRef = getCollectionRef();
-      if (!collRef || !userId) return; // Error already set by getCollectionRef
-
-      // Basic validation before sending
+      if (!collRef || !userId) return;
       if (!newItemData.title || !newItemData.type || !newItemData.status) {
-          console.error("Attempted to add item with missing essential data:", newItemData);
-          setError("Cannot add item: Missing title, type, or status.");
-          return;
+          setError("Cannot add item: Missing title, type, or status."); return;
       }
-
       console.log("Attempting to add item:", newItemData.title);
       try {
-          setError(null); // Clear previous errors
-          const docToAdd = {
-              ...newItemData,
-              user_id: userId, // Store the userId with the item
-              createdAt: Timestamp.now() // Add a creation timestamp
-          };
+          setError(null);
+          const docToAdd = { ...newItemData, user_id: userId, createdAt: Timestamp.now() };
           const docRef = await addDoc(collRef, docToAdd);
           console.log("Document successfully written with ID: ", docRef.id);
-          // State update happens via onSnapshot listener
       } catch (err) {
           console.error("Error adding document: ", err);
-          setError(`Failed to add item: ${err instanceof Error ? err.message : 'Unknown Firestore error'}. Check Firestore rules and network connection.`);
+          setError(`Failed to add item: ${err instanceof Error ? err.message : 'Unknown Firestore error'}.`);
       }
   };
 
   const handleDeleteItem = async (id: string) => {
       const collRef = getCollectionRef();
       if (!collRef) return;
-
       console.log("Attempting to delete item:", id);
       try {
           setError(null);
-          const itemDoc = doc(collRef, id); // Use doc() to get a DocumentReference
-          await deleteDoc(itemDoc);
+          await deleteDoc(doc(collRef, id)); // Use doc(collRef, id)
           console.log("Document successfully deleted with ID: ", id);
-          // State update happens via onSnapshot listener
       } catch (err) {
           console.error("Error deleting document: ", err);
-          setError(`Failed to delete item: ${err instanceof Error ? err.message : 'Unknown Firestore error'}. Check Firestore rules and network connection.`);
+          setError(`Failed to delete item: ${err instanceof Error ? err.message : 'Unknown Firestore error'}.`);
       }
   };
 
   const handleUpdateStatus = async (id: string, status: MediaStatus) => {
       const collRef = getCollectionRef();
       if (!collRef) return;
-
       console.log("Attempting to update status for item:", id, "to", status);
       try {
           setError(null);
-          const itemDoc = doc(collRef, id);
-          await updateDoc(itemDoc, { status: status });
+          await updateDoc(doc(collRef, id), { status }); // Use doc(collRef, id)
           console.log("Document status successfully updated for ID: ", id);
-          // State update happens via onSnapshot listener
       } catch (err) {
           console.error("Error updating status: ", err);
-          setError(`Failed to update status: ${err instanceof Error ? err.message : 'Unknown Firestore error'}. Check Firestore rules and network connection.`);
+          setError(`Failed to update status: ${err instanceof Error ? err.message : 'Unknown Firestore error'}.`);
       }
   };
 
-  const handleUpdateRating = async (id: string, rating: number | null) => { // Allow null
+  const handleUpdateRating = async (id: string, rating: number | null) => {
       const collRef = getCollectionRef();
        if (!collRef) return;
-
        console.log("Attempting to update rating for item:", id, "to", rating);
       try {
           setError(null);
-          const itemDoc = doc(collRef, id);
-          // Firestore handles null correctly, ensure rating is number or null
           const ratingToUpdate = (typeof rating === 'number' && rating >= 1 && rating <= 5) ? rating : null;
-          await updateDoc(itemDoc, { rating: ratingToUpdate });
+          await updateDoc(doc(collRef, id), { rating: ratingToUpdate }); // Use doc(collRef, id)
           console.log("Document rating successfully updated for ID: ", id);
-          // State update happens via onSnapshot listener
       } catch (err) {
           console.error("Error updating rating: ", err);
-          setError(`Failed to update rating: ${err instanceof Error ? err.message : 'Unknown Firestore error'}. Check Firestore rules and network connection.`);
+          setError(`Failed to update rating: ${err instanceof Error ? err.message : 'Unknown Firestore error'}.`);
       }
   };
 
   // --- Render Logic ---
+  const renderLoadingIndicator = (message: string) => (
+       <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
+           <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-e-transparent align-[-0.125em] text-indigo-500 motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
+               <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
+           </div>
+          <p className="mt-2 text-slate-500 dark:text-slate-400">{message}</p>
+       </div>
+  );
+
   const renderContent = () => {
-    if (!isAuthReady) {
-      return (
-        <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
-           {/* Simple loading indicator */}
-            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-e-transparent align-[-0.125em] text-indigo-500 motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
-                <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
-            </div>
-           <p className="mt-2 text-slate-500 dark:text-slate-400">Authenticating...</p>
-        </div>
-      );
-    }
-    if (!userId) { // Auth is ready, but sign-in failed or user is invalid
+    if (!isAuthReady) return renderLoadingIndicator("Authenticating...");
+    if (!userId) {
         return (
             <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
                 <p className="text-red-500 dark:text-red-400 font-semibold">Authentication Failed</p>
-                <p className="text-slate-500 dark:text-slate-400 mt-2">Cannot load or save watchlist data. {error || "Please try refreshing the page."}</p>
+                <p className="text-slate-500 dark:text-slate-400 mt-2">{error || "Cannot load or save watchlist data. Please try refreshing the page."}</p>
             </div>
         );
     }
-     if (isLoading) { // Auth is ready, userId exists, but data is loading
-        return (
-            <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
-                 <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-e-transparent align-[-0.125em] text-indigo-500 motion-reduce:animate-[spin_1.5s_linear_infinite]" role="status">
-                    <span className="!absolute !-m-px !h-px !w-px !overflow-hidden !whitespace-nowrap !border-0 !p-0 ![clip:rect(0,0,0,0)]">Loading...</span>
-                 </div>
-                <p className="mt-2 text-slate-500 dark:text-slate-400">Loading your watchlist...</p>
-            </div>
-        );
-    }
-    // Auth ready, userId exists, not loading -> show main content
+     if (isLoading) return renderLoadingIndicator("Loading your watchlist...");
+
+    // Main content when authenticated and data loaded (or empty)
     return (
         <>
             <AddItemForm onAddItem={handleAddItem} />
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-1 order-last lg:order-first"> {/* Adjust order for mobile */}
+                <div className="lg:col-span-1 order-last lg:order-first">
                     <div className="space-y-8">
                         <Suggestions items={mediaItems} />
                         <GenreAnalytics items={mediaItems} />
                     </div>
                 </div>
-                <div className="lg:col-span-2 order-first lg:order-last"> {/* Adjust order for mobile */}
+                <div className="lg:col-span-2 order-first lg:order-last">
                     <Watchlist
                         items={mediaItems}
                         onDeleteItem={handleDeleteItem}
@@ -430,12 +351,11 @@ function App() {
     );
   };
 
-
   // --- Main Return ---
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans">
       <Header isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
-      <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8"> {/* Responsive padding */}
+      <main className="container mx-auto p-4 md:p-6 lg:p-8 space-y-8">
 
         {/* Display User ID for context */}
         {userId && (
@@ -452,7 +372,6 @@ function App() {
                 <span className="block sm:inline">{error}</span>
             </div>
             <button onClick={() => setError(null)} className="ml-4 px-2 py-1 text-red-700 hover:bg-red-200 rounded" aria-label="Close error message">
-                {/* Simple X icon */}
                  <svg className="fill-current h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><title>Close</title><path d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.819l-2.651 2.651a1.2 1.2 0 1 1-1.697-1.697L8.18 10 5.53 7.349a1.2 1.2 0 1 1 1.697-1.697L10 8.18l2.651-2.651a1.2 1.2 0 1 1 1.697 1.697L11.819 10l2.651 2.651a1.2 1.2 0 0 1 0 1.698z"/></svg>
             </button>
           </div>
