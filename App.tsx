@@ -1,19 +1,18 @@
 import React, { useState, useEffect } from 'react';
-// Use relative paths with extensions
-import Header from './components/Header.tsx';
-import Watchlist from './components/Watchlist.tsx';
-import AddItemForm from './components/AddItemForm.tsx';
-import GenreAnalytics from './components/GenreAnalytics.tsx';
-import Suggestions from './components/Suggestions.tsx';
-import type { MediaItem } from './types.ts';
-import { MediaStatus, MediaType } from './types.ts';
-import { GoogleIcon } from './components/icons.tsx'; // Import Google Icon
+// Use relative paths without extensions
+import Header from './components/Header';
+import Watchlist from './components/Watchlist';
+import AddItemForm from './components/AddItemForm';
+import GenreAnalytics from './components/GenreAnalytics';
+import Suggestions from './components/Suggestions';
+import type { MediaItem } from './types';
+import { MediaStatus, MediaType } from './types';
+import { GoogleIcon } from './components/icons'; // Import Google Icon
 
 // Firebase Imports
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import {
     getAuth,
-    // signInAnonymously, // No longer needed
     onAuthStateChanged,
     type Auth,
     type User,
@@ -419,18 +418,6 @@ function App() {
        </div>
   );
 
-  const renderContent = () => {
-    // Show loading indicator until authentication check is complete
-    if (!isAuthReady) return renderLoadingIndicator("Authenticating...");
-
-    // Show error if authentication failed or user couldn't be determined
-    if (!userId) {
-        return (
-            <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-md">
-          <p className="mt-2 text-slate-500 dark:text-slate-400">{onmessage}</p>
-       </div>
-  );
-
   // A simple login screen component
   const renderLoginScreen = () => (
       <div className="text-center py-16 px-6 bg-white dark:bg-slate-800 rounded-lg shadow-lg max-w-md mx-auto">
@@ -446,6 +433,7 @@ function App() {
       </div>
   );
 
+  // *** THIS IS THE CORRECT, SINGLE renderContent FUNCTION ***
   const renderContent = () => {
     // Show loading indicator until authentication check is complete
     if (!isAuthReady) return renderLoadingIndicator("Authenticating...");
@@ -535,4 +523,3 @@ function App() {
 }
 
 export default App;
-  }
